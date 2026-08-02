@@ -33,7 +33,7 @@ if not st.session_state["authenticated"]:
                 st.rerun()
             else:
                 st.error("IDまたはパスワードが間違っています。")
-    st.stop()  # 認証されるまでここでストップ
+    st.stop()
 
 # --- ログイン成功後のメインアプリ ---
 st.title("🧪 BOD分析 AI学習型シミュレーター")
@@ -151,9 +151,6 @@ BOTTLE_VOL = 100.0
 INITIAL_DO = 8.0  # 溶存酸素の初期値 (mg/L)
 IDEAL_CONSUMPTION = INITIAL_DO * 0.55  # 55%消費 (4.4 mg/L)
 
-# 倍々（きれいなステップ）の標準分取量リスト
-ALLOWED_VOLUMES = [100.0, 50.0, 25.0, 12.0, 6.0, 3.0, 1.5]
-
 # --- 4. メイン画面：本日の検体データ入力と予測 ---
 st.header("1. 本日の検体データ入力")
 st.write(f"対象試料: **{target_name}**")
@@ -186,50 +183,76 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 倍々ステップで理想値を真ん中に配置した6水準の自動生成（自動希釈倍率対応） ---
+# --- 5. 原液と希釈液を混在させ、理想値を真ん中に配置した6水準の自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 修正：原液換算での理想分取量が 3.0 mL 未満になる場合は、適切なサイズ（1.5〜50mLの中央付近）に入るまで自動で希釈倍率を上げる
-pre_dilution = 1
-while (v_orig_ideal * pre_dilution) < 6.0 and pre_dilution < 100000:
-    pre_dilution *= 10
+# ベースとなる原液換算での理想分取量を基準に、前後6つの「原液換算でのミリリットル数」を綺麗に組み立てる
+# 許容される標準ステップ（原液換算ベース）
+BASE_STEP_VOLUMES = [
+    100.0,
+    50.0,
+    25.0,
+    12.0,
+    6.0,
+    3.0,
+    1.5,
+    0.6,
+    0.3,
+    0.15,
+]
+base_arr = np.array(BASE_STEP_VOLUMES)
 
-if pre_dilution == 1:
-    sample_label = "原液"
-else:
-    sample_label = f"×{pre_dilution}希釈液"
+ideal_idx_in_base = np.abs(base_arr - v_orig_ideal).argmin()
 
-v_sol_ideal = v_orig_ideal * pre_dilution
-
-allowed_arr = np.array(ALLOWED_VOLUMES)
-ideal_idx_in_allowed = np.abs(allowed_arr - v_sol_ideal).argmin()
-
-# 倍々リストから理想値が真ん中付近（前後2〜3個ずつ計6個）になるように切り出し
-start_idx = max(0, ideal_idx_in_allowed - 2)
+# 理想値が真ん中付近（前後2〜3個ずつ計6個）になるように切り出し
+start_idx = max(0, ideal_idx_in_base - 2)
 end_idx = start_idx + 6
-if end_idx > len(ALLOWED_VOLUMES):
-    end_idx = len(ALLOWED_VOLUMES)
+if end_idx > len(BASE_STEP_VOLUMES):
+    end_idx = len(BASE_STEP_VOLUMES)
     start_idx = max(0, end_idx - 6)
 
-selected_volumes = ALLOWED_VOLUMES[start_idx:end_idx]
-selected_volumes = sorted(selected_volumes, reverse=True)
+selected_orig_equivs = BASE_STEP_VOLUMES[start_idx:end_idx]
+selected_orig_equivs = sorted(selected_orig_equivs, reverse=True)
 
-if pre_dilution > 1:
-    st.warning(
-        f"⚠️ **高濃度検体**のため、あらかじめ **【 {sample_label} 】**"
-        f"を作成し、その液を分取して測定してください。"
-    )
+# 各水準ごとに「原液でいくか、10倍/100倍希釈液にするか」を自動割り振り
+# （※ 原液換算で 3.0 mL 以上、かつ 50 mL以下のものは「原液」として扱うことで、10倍の50mLなどを排除）
+rows_config = []
+for v_eq in selected_orig_equivs:
+    if v_eq >= 3.0 and v_eq <= 50.0:
+        rows_config.append({"sample_label": "原液", "分取量": v_eq, "pre_dil": 1})
+    elif v_eq > 50.0:
+        # 50mLを超える大きな量は原液50mLに丸めるか、あるいは原液扱い
+        rows_config.append(
+            {"sample_label": "原液", "分取量": 50.0, "pre_dil": 1}
+        )
+    elif v_eq >= 0.3:
+        # 3mL未満の細かい量は、10倍希釈液を使って 3.0〜30.0 mL の使いやすい分取量に変換
+        rows_config.append(
+            {"sample_label": "×10希釈液", "分取量": v_eq * 10.0, "pre_dil": 10}
+        )
+    else:
+        # さらに小さい量は100倍希釈液を使用
+        rows_config.append(
+            {"sample_label": "×100希釈液", "分取量": v_eq * 100.0, "pre_dil": 100}
+        )
 
+# 一番理想値（v_orig_ideal）に近い行のインデックスを特定
 ideal_idx = min(
-    range(len(selected_volumes)),
-    key=lambda i: abs((selected_volumes[i] / pre_dilution) - v_orig_ideal),
+    range(len(rows_config)),
+    key=lambda i: abs(
+        (rows_config[i]["分取量"] / rows_config[i]["pre_dil"]) - v_orig_ideal
+    ),
 )
 
 # --- 結果のテーブル表示 ---
 table_data = []
-for i, v in enumerate(selected_volumes):
+for i, rc in enumerate(rows_config):
+    v = rc["分取量"]
+    pre_dilution = rc["pre_dil"]
+    sample_label = rc["sample_label"]
+
     v_orig_equiv = v / pre_dilution
     total_dilution_factor = (BOTTLE_VOL / v_orig_equiv) * pre_dilution
 
@@ -264,13 +287,7 @@ for i, v in enumerate(selected_volumes):
         {
             "仕込み液": sample_label,
             "分取量 (mL)": f"{v:.1f} mL" if not v.is_integer() else f"{v:.0f} mL",
-            "（参考）原液換算": (
-                f"{v_orig_equiv:.2f} mL"
-                if pre_dilution > 1
-                else (
-                    f"{v:.1f} mL" if not v.is_integer() else f"{v:.0f} mL"
-                )
-            ),
+            "（参考）原液換算": f"{v_orig_equiv:.2f} mL",
             "総合希釈倍率": dilution_str,
             "予想ボトル内消費量 (mg/L)": f"{expected_consumption:.2f}",
             "予想DO消費率 (%)": f"{est_cons_percent:.0f}%",
