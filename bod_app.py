@@ -9,10 +9,12 @@ from sklearn.preprocessing import PolynomialFeatures
 
 # ページ設定
 st.set_page_config(
-    page_title="BOD分析 AI学習型シミュレーター", layout="wide"
+    page_title="BOD分析 AI学習型シミュレーター",
+    page_icon="png_file.png",  # ← ここに画像ファイルを指定します
+    layout="wide"
 )
 
-st.title("🧪 BOD分析 AI学習型シミュレーター")
+st.title("⚗️ BOD分析 AI学習型シミュレーター")
 
 DATA_DIR = "sample_data"
 MODEL_DIR = "sample_models"
