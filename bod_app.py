@@ -193,7 +193,7 @@ v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
 # 濃度に応じて、自動で希釈倍率（1倍、10倍、100倍...）を決定
 pre_dilution = 1
-while (v_orig_ideal * pre_dilution) < 1.5 and pre_dilution < 1000:
+while (v_orig_ideal * pre_dilution) < 1.5 and pre_dilution < 100000:
     pre_dilution *= 10
 
 if pre_dilution == 1:
