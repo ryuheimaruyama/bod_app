@@ -33,7 +33,7 @@ if not st.session_state["authenticated"]:
                 st.rerun()
             else:
                 st.error("IDまたはパスワードが間違っています。")
-    st.stop()  # 認証されるここで処理をストップ
+    st.stop()  # 認証されるまでここでストップ
 
 # --- ログイン成功後のメインアプリ ---
 st.title("🧪 BOD分析 AI学習型シミュレーター")
@@ -109,7 +109,6 @@ if os.path.exists(DATA_FILE):
 else:
     initial_data = default_data
 
-# データエディタ（行の追加・不要な行のチェック削除が可能）
 edited_df = st.sidebar.data_editor(
     initial_data, num_rows="dynamic", key=f"editor_{target_name}"
 )
@@ -202,69 +201,49 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 半分ずつ（倍々）のステップで6水準を自動生成 ---
+# --- 5. 理想値を真ん中に配置した6水準の自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
-if est_bod_center <= 5.0:
-    selected_volumes = [100.0, 50.0, 25.0, 12.0, 6.0, 1.5]
+# 1. 理想的な原液換算の分取量を計算
+v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
+
+# 2. 希釈が必要かどうかの判定（原液換算で1.5mL未満になる場合は10倍希釈を導入）
+if v_orig_ideal < 1.5:
+    pre_dilution = 10
+    sample_label = "×10希釈液"
+    v_sol_ideal = v_orig_ideal * pre_dilution
+else:
     pre_dilution = 1
     sample_label = "原液"
-else:
-    v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
+    v_sol_ideal = v_orig_ideal
 
-    pre_dilution = 1
-    while (v_orig_ideal * pre_dilution) < 1.5 and pre_dilution < 100000:
-        pre_dilution *= 10
+allowed_arr = np.array(ALLOWED_VOLUMES)
 
-    if pre_dilution == 1:
-        sample_label = "原液"
-    else:
-        sample_label = f"×{pre_dilution}"
+# 理想値に最も近い標準分取量のインデックスを探す
+ideal_idx_in_allowed = np.abs(allowed_arr - v_sol_ideal).argmin()
 
-    v_sol_ideal = v_orig_ideal * pre_dilution
-    if v_sol_ideal > 100.0:
-        v_sol_ideal = 100.0
+# 6水準を作るため、理想値の前後からバランスよく選出する（理想値が真ん中付近にくるようにする）
+start_idx = max(0, ideal_idx_in_allowed - 3)
+end_idx = start_idx + 6
+if end_idx > len(ALLOWED_VOLUMES):
+    end_idx = len(ALLOWED_VOLUMES)
+    start_idx = max(0, end_idx - 6)
 
-    allowed_arr = np.array(ALLOWED_VOLUMES)
-    idx_center = np.abs(allowed_arr - v_sol_ideal).argmin()
-    best_v = ALLOWED_VOLUMES[idx_center]
-
-    current_val = best_v
-    for _ in range(2):
-        larger_cands = [v for v in ALLOWED_VOLUMES if v > current_val and v <= 100.0]
-        if larger_cands:
-            next_larger = min(larger_cands, key=lambda x: abs(x - current_val * 2))
-            if abs(next_larger - current_val * 2) <= current_val * 0.8:
-                current_val = next_larger
-
-    generated_vols = [current_val]
-    for _ in range(5):
-        next_target = generated_vols[-1] / 2.0
-        closest_v = min(ALLOWED_VOLUMES, key=lambda x: abs(x - next_target))
-        if closest_v not in generated_vols and 1.5 <= closest_v <= 100.0:
-            generated_vols.append(closest_v)
-
-    if len(generated_vols) < 6:
-        base_set = [100.0, 50.0, 25.0, 12.0, 6.0, 3.0, 1.5]
-        idx_b = min(range(len(base_set)), key=lambda i: abs(base_set[i] - best_v))
-        start_i = max(0, idx_b - 2)
-        end_i = min(len(base_set), start_i + 6)
-        if end_i - start_i < 6:
-            start_i = max(0, end_i - 6)
-        selected_volumes = base_set[start_i:end_i]
-    else:
-        selected_volumes = generated_vols[:6]
-
-    selected_volumes = sorted(selected_volumes, reverse=True)
+selected_volumes = ALLOWED_VOLUMES[start_idx:end_idx]
+# 大きい順（濃い方から薄い方へ）に並べ替え
+selected_volumes = sorted(selected_volumes, reverse=True)
 
 if pre_dilution > 1:
     st.warning(
-        f"⚠️ **高濃度検体**のため、あらかじめ **【 {sample_label} 】**（{pre_dilution}倍希釈液）を作成してから分取してください。"
+        f"⚠️ **高濃度検体**のため、あらかじめ **【 {sample_label} 】**"
+        "（10倍希釈液）を作成し、その液を分取して測定してください。"
     )
 
 # --- 6水準の中で、一番理想値に近いインデックスを特定 ---
-actual_volumes_arr = np.array(selected_volumes)
-ideal_idx = np.abs(actual_volumes_arr - (IDEAL_CONSUMPTION * BOTTLE_VOL / est_bod_center) * (1 if pre_dilution==1 else pre_dilution)).argmin()
+ideal_idx = min(
+    range(len(selected_volumes)),
+    key=lambda i: abs((selected_volumes[i] / pre_dilution) - v_orig_ideal),
+)
 
 # --- 結果のテーブル表示 ---
 table_data = []
@@ -326,9 +305,13 @@ display_df = df.drop(columns=["_color_type"])
 def color_rows_and_cells(row):
     ctype = df.loc[row.name, "_color_type"]
     if ctype == "blue":
-        return ["background-color: #cce5ff; color: #004085; font-weight: bold;"] * len(row)
+        return [
+            "background-color: #cce5ff; color: #004085; font-weight: bold;"
+        ] * len(row)
     elif ctype == "green":
-        return ["background-color: #d4edda; color: #155724; font-weight: bold;"] * len(row)
+        return [
+            "background-color: #d4edda; color: #155724; font-weight: bold;"
+        ] * len(row)
     elif ctype == "yellow":
         return ["background-color: #fff3cd; color: #856404;"] * len(row)
     else:
