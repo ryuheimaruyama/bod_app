@@ -204,11 +204,10 @@ st.info(
 # --- 5. 理想値を真ん中に配置した6水準の自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
-# 1. 理想的な原液換算の分取量を計算
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 2. 希釈が必要かどうかの判定（原液換算で1.5mL未満になる場合は10倍希釈を導入）
-if v_orig_ideal < 1.5:
+# 原液換算で 3.0 mL未満になる高濃度の場合は 10倍希釈液を自動採用
+if v_orig_ideal < 3.0:
     pre_dilution = 10
     sample_label = "×10希釈液"
     v_sol_ideal = v_orig_ideal * pre_dilution
@@ -218,11 +217,9 @@ else:
     v_sol_ideal = v_orig_ideal
 
 allowed_arr = np.array(ALLOWED_VOLUMES)
-
-# 理想値に最も近い標準分取量のインデックスを探す
 ideal_idx_in_allowed = np.abs(allowed_arr - v_sol_ideal).argmin()
 
-# 6水準を作るため、理想値の前後からバランスよく選出する（理想値が真ん中付近にくるようにする）
+# 理想値が真ん中付近にくるように前後6個を切り出し
 start_idx = max(0, ideal_idx_in_allowed - 3)
 end_idx = start_idx + 6
 if end_idx > len(ALLOWED_VOLUMES):
@@ -230,7 +227,6 @@ if end_idx > len(ALLOWED_VOLUMES):
     start_idx = max(0, end_idx - 6)
 
 selected_volumes = ALLOWED_VOLUMES[start_idx:end_idx]
-# 大きい順（濃い方から薄い方へ）に並べ替え
 selected_volumes = sorted(selected_volumes, reverse=True)
 
 if pre_dilution > 1:
@@ -239,7 +235,6 @@ if pre_dilution > 1:
         "（10倍希釈液）を作成し、その液を分取して測定してください。"
     )
 
-# --- 6水準の中で、一番理想値に近いインデックスを特定 ---
 ideal_idx = min(
     range(len(selected_volumes)),
     key=lambda i: abs((selected_volumes[i] / pre_dilution) - v_orig_ideal),
