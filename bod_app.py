@@ -186,25 +186,27 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 倍々ステップで理想値を真ん中に配置した6水準の自動生成 ---
+# --- 5. 倍々ステップで理想値を真ん中に配置した6水準の自動生成（自動希釈倍率対応） ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 原液換算で 3.0 mL未満になる高濃度の場合は 10倍希釈液を自動採用
-if v_orig_ideal < 3.0:
-    pre_dilution = 10
-    sample_label = "×10希釈液"
-    v_sol_ideal = v_orig_ideal * pre_dilution
-else:
-    pre_dilution = 1
+# 濃度に応じて、自動で希釈倍率（1倍、10倍、100倍...）を決定
+pre_dilution = 1
+while (v_orig_ideal * pre_dilution) < 1.5 and pre_dilution < 1000:
+    pre_dilution *= 10
+
+if pre_dilution == 1:
     sample_label = "原液"
-    v_sol_ideal = v_orig_ideal
+else:
+    sample_label = f"×{pre_dilution}希釈液"
+
+v_sol_ideal = v_orig_ideal * pre_dilution
 
 allowed_arr = np.array(ALLOWED_VOLUMES)
 ideal_idx_in_allowed = np.abs(allowed_arr - v_sol_ideal).argmin()
 
-# 倍々リストから理想値が真ん中付近（前後3つずつ計6個）になるように切り出し
+# 倍々リストから理想値が真ん中付近（前後2〜3個ずつ計6個）になるように切り出し
 start_idx = max(0, ideal_idx_in_allowed - 2)
 end_idx = start_idx + 6
 if end_idx > len(ALLOWED_VOLUMES):
@@ -217,7 +219,7 @@ selected_volumes = sorted(selected_volumes, reverse=True)
 if pre_dilution > 1:
     st.warning(
         f"⚠️ **高濃度検体**のため、あらかじめ **【 {sample_label} 】**"
-        "（10倍希釈液）を作成し、その液を分取して測定してください。"
+        f"を作成し、その液を分取して測定してください。"
     )
 
 ideal_idx = min(
