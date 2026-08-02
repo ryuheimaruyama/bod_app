@@ -10,11 +10,38 @@ from sklearn.preprocessing import PolynomialFeatures
 # ページ設定
 st.set_page_config(
     page_title="BOD分析 AI学習型シミュレーター",
-    page_icon="png_file.png",  # ← ここに画像ファイルを指定します
-    layout="wide"
+    page_icon="icon.png",
+    layout="wide",
 )
 
-st.title("⚗️ BOD分析 AI学習型シミュレーター")
+# --- 簡易ログイン認証機能 ---
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.title("🔒 ログイン認証")
+    st.write("BOD分析AIシミュレーターを利用するにはログインしてください。")
+
+    with st.form("login_form"):
+        input_id = st.text_input("ユーザーID")
+        input_pass = st.text_input("パスワード", type="password")
+        submit_button = st.form_submit_button("ログイン")
+
+        if submit_button:
+            if input_id == "water" and input_pass == "mizu":
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("IDまたはパスワードが間違っています。")
+    st.stop()  # 認証されるここで処理をストップ
+
+# --- ログイン成功後のメインアプリ ---
+st.title("🧪 BOD分析 AI学習型シミュレーター")
+
+# ログアウトボタンをサイドバーに配置
+if st.sidebar.button("🚪 ログアウト"):
+    st.session_state["authenticated"] = False
+    st.rerun()
 
 DATA_DIR = "sample_data"
 MODEL_DIR = "sample_models"
@@ -50,12 +77,22 @@ else:
 DATA_FILE = os.path.join(DATA_DIR, f"{target_name}_data.csv")
 MODEL_FILE = os.path.join(MODEL_DIR, f"{target_name}_model.pkl")
 
+# --- 保存した試料データ自体の削除機能 ---
+if mode == "既存の試料を呼び出す" and len(saved_files) > 0:
+    if st.sidebar.button(f"🗑️ 選択中の試料「{target_name}」を削除"):
+        if os.path.exists(DATA_FILE):
+            os.remove(DATA_FILE)
+        if os.path.exists(MODEL_FILE):
+            os.remove(MODEL_FILE)
+        st.sidebar.success(f"「{target_name}」を削除しました。")
+        st.rerun()
+
 st.sidebar.markdown(f"**現在選択中:** `{target_name}`")
 
 # --- 2. 選択した試料の過去データ管理 ---
 st.sidebar.markdown("---")
 st.sidebar.header("📊 2. 過去データの管理")
-st.sidebar.write("この試料のCOD・BOD測定データを編集・保存します。")
+st.sidebar.write("この試料のCOD・BOD測定データを編集・保存・削除します。")
 
 default_data = pd.DataFrame(
     {
@@ -72,6 +109,7 @@ if os.path.exists(DATA_FILE):
 else:
     initial_data = default_data
 
+# データエディタ（行の追加・不要な行のチェック削除が可能）
 edited_df = st.sidebar.data_editor(
     initial_data, num_rows="dynamic", key=f"editor_{target_name}"
 )
