@@ -151,23 +151,8 @@ BOTTLE_VOL = 100.0
 INITIAL_DO = 8.0  # 溶存酸素の初期値 (mg/L)
 IDEAL_CONSUMPTION = INITIAL_DO * 0.55  # 55%消費 (4.4 mg/L)
 
-ALLOWED_VOLUMES = [
-    100.0,
-    70.0,
-    50.0,
-    40.0,
-    30.0,
-    25.0,
-    20.0,
-    15.0,
-    12.0,
-    10.0,
-    8.0,
-    6.0,
-    5.0,
-    3.0,
-    1.5,
-]
+# 倍々（きれいなステップ）の標準分取量リスト
+ALLOWED_VOLUMES = [100.0, 50.0, 25.0, 12.0, 6.0, 3.0, 1.5]
 
 # --- 4. メイン画面：本日の検体データ入力と予測 ---
 st.header("1. 本日の検体データ入力")
@@ -201,7 +186,7 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 理想値を真ん中に配置した6水準の自動生成 ---
+# --- 5. 倍々ステップで理想値を真ん中に配置した6水準の自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
@@ -219,8 +204,8 @@ else:
 allowed_arr = np.array(ALLOWED_VOLUMES)
 ideal_idx_in_allowed = np.abs(allowed_arr - v_sol_ideal).argmin()
 
-# 理想値が真ん中付近にくるように前後6個を切り出し
-start_idx = max(0, ideal_idx_in_allowed - 3)
+# 倍々リストから理想値が真ん中付近（前後3つずつ計6個）になるように切り出し
+start_idx = max(0, ideal_idx_in_allowed - 2)
 end_idx = start_idx + 6
 if end_idx > len(ALLOWED_VOLUMES):
     end_idx = len(ALLOWED_VOLUMES)
