@@ -191,9 +191,9 @@ st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 濃度に応じて、自動で希釈倍率（1倍、10倍、100倍...）を決定
+# 修正：原液換算での理想分取量が 3.0 mL 未満になる場合は、適切なサイズ（1.5〜50mLの中央付近）に入るまで自動で希釈倍率を上げる
 pre_dilution = 1
-while (v_orig_ideal * pre_dilution) < 1.5 and pre_dilution < 100000:
+while (v_orig_ideal * pre_dilution) < 6.0 and pre_dilution < 100000:
     pre_dilution *= 10
 
 if pre_dilution == 1:
