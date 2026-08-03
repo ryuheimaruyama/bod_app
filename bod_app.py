@@ -203,11 +203,12 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 原液と希釈液の混在、100mL対応、理想値中央配置の6水準自動生成 ---
+# --- 5. 10万倍希釈まで完全対応した理想値中央配置の6水準自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
+# 10万倍までの超高濃度に対応する原液換算ステップ
 BASE_STEP_VOLUMES = [
     100.0,
     50.0,
@@ -219,6 +220,13 @@ BASE_STEP_VOLUMES = [
     0.6,
     0.3,
     0.15,
+    0.06,
+    0.03,
+    0.015,
+    0.006,
+    0.003,
+    0.0006,
+    0.0003,
 ]
 base_arr = np.array(BASE_STEP_VOLUMES)
 
@@ -235,7 +243,7 @@ selected_orig_equivs = sorted(selected_orig_equivs, reverse=True)
 
 raw_rows_config = []
 for v_eq in selected_orig_equivs:
-    if v_eq >= 3.0 and v_eq <= 100.0:  # 💡 100mLまで原液として選択可能に拡張
+    if v_eq >= 3.0 and v_eq <= 100.0:
         raw_rows_config.append({"sample_label": "原液", "分取量": v_eq, "pre_dil": 1})
     elif v_eq > 100.0:
         raw_rows_config.append(
@@ -245,9 +253,33 @@ for v_eq in selected_orig_equivs:
         raw_rows_config.append(
             {"sample_label": "×10希釈液", "分取量": v_eq * 10.0, "pre_dil": 10}
         )
-    else:
+    elif v_eq >= 0.03:
         raw_rows_config.append(
             {"sample_label": "×100希釈液", "分取量": v_eq * 100.0, "pre_dil": 100}
+        )
+    elif v_eq >= 0.003:
+        raw_rows_config.append(
+            {
+                "sample_label": "×1000希釈液",
+                "分取量": v_eq * 1000.0,
+                "pre_dil": 1000,
+            }
+        )
+    elif v_eq >= 0.0003:
+        raw_rows_config.append(
+            {
+                "sample_label": "×10000希釈液",
+                "分取量": v_eq * 10000.0,
+                "pre_dil": 10000,
+            }
+        )
+    else:
+        raw_rows_config.append(
+            {
+                "sample_label": "×100000希釈液",
+                "分取量": v_eq * 100000.0,
+                "pre_dil": 100000,
+            }
         )
 
 # 重複排除
@@ -259,7 +291,6 @@ for rc in raw_rows_config:
         seen.add(key)
         rows_config.append(rc)
 
-# 常に6水準になるように調整
 if len(rows_config) > 6:
     rows_config = rows_config[:6]
 
@@ -311,7 +342,7 @@ for i, rc in enumerate(rows_config):
         {
             "仕込み液": sample_label,
             "分取量 (mL)": f"{v:.1f} mL" if not v.is_integer() else f"{v:.0f} mL",
-            "（参考）原液換算": f"{v_orig_equiv:.2f} mL",
+            "（参考）原液換算": f"{v_orig_equiv:.4f} mL",
             "総合希釈倍率": dilution_str,
             "予想ボトル内消費量 (mg/L)": f"{expected_consumption:.2f}",
             "予想DO消費率 (%)": f"{est_cons_percent:.0f}%",
