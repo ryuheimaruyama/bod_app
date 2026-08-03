@@ -171,26 +171,23 @@ else:
     pred_input = np.array([[float(cod_input)]])
     raw_pred = float(model.predict(pred_input)[0])
 
-    # 🧠 ベテランの勘所ガードレール（相関実績に基づく論理的制約）
-    # 過去データのBOD/COD比率のmin/maxを計算し、モデルの暴走（極端な低値やマイナス、異常高騰）を防ぐ
     valid_mask = cod_vals > 0
     if np.any(valid_mask):
         ratios = bod_vals[valid_mask] / cod_vals[valid_mask]
-        min_ratio = max(0.1, ratios.min() * 0.7)  # 過去実績の下限より少し余裕を持たせる
-        max_ratio = ratios.max() * 1.3  # 過去実績の上限より少し余裕を持たせる
+        min_ratio = max(0.1, ratios.min() * 0.7)
+        max_ratio = ratios.max() * 1.3
     else:
         min_ratio, max_ratio = 0.2, 3.0
 
-    # ガードレール適用：予測値が過去実績の許容範囲内かチェックし、逸脱していればクランプ（安全制限）する
     lower_bound = float(cod_input) * min_ratio
     upper_bound = float(cod_input) * max_ratio
 
     if raw_pred < lower_bound:
         est_bod_center = lower_bound
-        estimation_note = f"（相関モデル値が低すぎるため、過去実績の比率下限({min_ratio:.2f})に補正）"
+        estimation_note = f"（相関モデル値が低すぎるため、過去実績の下限比率に補正）"
     elif raw_pred > upper_bound:
         est_bod_center = upper_bound
-        estimation_note = f"（相関モデル値が高すぎるため、過去実績の比率上限({max_ratio:.2f})に補正）"
+        estimation_note = f"（相関モデル値が高すぎるため、過去実績の上限比率に補正）"
     else:
         est_bod_center = raw_pred
         estimation_note = f"（「{target_name}」の相関モデルによる推算）"
@@ -206,12 +203,11 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 原液と希釈液を混在させ、理想値を真ん中に配置した6水準の自動生成 ---
+# --- 5. 原液と希釈液の混在、重複排除、理想値中央配置の6水準自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 許容される標準ステップ（原液換算ベース）
 BASE_STEP_VOLUMES = [
     100.0,
     50.0,
@@ -228,7 +224,6 @@ base_arr = np.array(BASE_STEP_VOLUMES)
 
 ideal_idx_in_base = np.abs(base_arr - v_orig_ideal).argmin()
 
-# 理想値が真ん中付近（前後2〜3個ずつ計6個）になるように切り出し
 start_idx = max(0, ideal_idx_in_base - 2)
 end_idx = start_idx + 6
 if end_idx > len(BASE_STEP_VOLUMES):
@@ -238,24 +233,35 @@ if end_idx > len(BASE_STEP_VOLUMES):
 selected_orig_equivs = BASE_STEP_VOLUMES[start_idx:end_idx]
 selected_orig_equivs = sorted(selected_orig_equivs, reverse=True)
 
-# 各水準ごとに「原液でいくか、10倍/100倍希釈液にするか」を自動割り振り
-# （※ 3.0 mL 以上、50.0 mL 以下のものは 10倍希釈を使わず「原液」としてスマートに配置）
-rows_config = []
+raw_rows_config = []
 for v_eq in selected_orig_equivs:
     if v_eq >= 3.0 and v_eq <= 50.0:
-        rows_config.append({"sample_label": "原液", "分取量": v_eq, "pre_dil": 1})
+        raw_rows_config.append({"sample_label": "原液", "分取量": v_eq, "pre_dil": 1})
     elif v_eq > 50.0:
-        rows_config.append(
+        raw_rows_config.append(
             {"sample_label": "原液", "分取量": 50.0, "pre_dil": 1}
         )
     elif v_eq >= 0.3:
-        rows_config.append(
+        raw_rows_config.append(
             {"sample_label": "×10希釈液", "分取量": v_eq * 10.0, "pre_dil": 10}
         )
     else:
-        rows_config.append(
+        raw_rows_config.append(
             {"sample_label": "×100希釈液", "分取量": v_eq * 100.0, "pre_dil": 100}
         )
+
+# 💡 重複する行（同じ仕込み液と分取量の組み合わせ）を完全に排除する処理
+seen = set()
+rows_config = []
+for rc in raw_rows_config:
+    key = (rc["sample_label"], rc["分取量"])
+    if key not in seen:
+        seen.add(key)
+        rows_config.append(rc)
+
+# 足りなくなった分を補う、または安全にスライス
+if len(rows_config) > 6:
+    rows_config = rows_config[:6]
 
 ideal_idx = min(
     range(len(rows_config)),
