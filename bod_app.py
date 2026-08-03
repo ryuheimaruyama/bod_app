@@ -203,7 +203,7 @@ st.info(
     f"📊 **BOD見込み範囲（CODの半分〜3倍）**: **{bod_min_range:.1f} 〜 {bod_max_range:.1f} mg/L**"
 )
 
-# --- 5. 原液と希釈液の混在、重複排除、理想値中央配置の6水準自動生成 ---
+# --- 5. 原液と希釈液の混在、100mL対応、理想値中央配置の6水準自動生成 ---
 st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
@@ -235,11 +235,11 @@ selected_orig_equivs = sorted(selected_orig_equivs, reverse=True)
 
 raw_rows_config = []
 for v_eq in selected_orig_equivs:
-    if v_eq >= 3.0 and v_eq <= 50.0:
+    if v_eq >= 3.0 and v_eq <= 100.0:  # 💡 100mLまで原液として選択可能に拡張
         raw_rows_config.append({"sample_label": "原液", "分取量": v_eq, "pre_dil": 1})
-    elif v_eq > 50.0:
+    elif v_eq > 100.0:
         raw_rows_config.append(
-            {"sample_label": "原液", "分取量": 50.0, "pre_dil": 1}
+            {"sample_label": "原液", "分取量": 100.0, "pre_dil": 1}
         )
     elif v_eq >= 0.3:
         raw_rows_config.append(
@@ -250,7 +250,7 @@ for v_eq in selected_orig_equivs:
             {"sample_label": "×100希釈液", "分取量": v_eq * 100.0, "pre_dil": 100}
         )
 
-# 💡 重複する行（同じ仕込み液と分取量の組み合わせ）を完全に排除する処理
+# 重複排除
 seen = set()
 rows_config = []
 for rc in raw_rows_config:
@@ -259,7 +259,7 @@ for rc in raw_rows_config:
         seen.add(key)
         rows_config.append(rc)
 
-# 足りなくなった分を補う、または安全にスライス
+# 常に6水準になるように調整
 if len(rows_config) > 6:
     rows_config = rows_config[:6]
 
