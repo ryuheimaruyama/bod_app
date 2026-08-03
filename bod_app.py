@@ -151,7 +151,7 @@ BOTTLE_VOL = 100.0
 INITIAL_DO = 8.0  # 溶存酸素の初期値 (mg/L)
 IDEAL_CONSUMPTION = INITIAL_DO * 0.55  # 55%消費 (4.4 mg/L)
 
-# --- 4. メイン画面：本日の検体データ入力と予測（ベテランの制約ガードレール搭載） ---
+# --- 4. メイン画面：本日の検体データ入力と予測（1σ乖離・3件以下自動新規判定） ---
 st.header("1. 本日の検体データ入力")
 st.write(f"対象試料: **{target_name}**")
 
@@ -159,10 +159,28 @@ cod_input = st.number_input(
     "現在の検体のCOD値 (mg/L)", min_value=0, value=18, step=1, format="%d"
 )
 
+# 🧠 1σ乖離判定およびデータ件数（3件以下）に基づく自動新規モード判定
+is_outlier = False
+if is_data_ready:
+    cod_mean = cod_vals.mean()
+    cod_std = cod_vals.std()
+    if cod_std > 0 and abs(float(cod_input) - cod_mean) > cod_std:
+        is_outlier = True
+
+default_new_mode = (
+    (not is_data_ready) or (len(cod_vals) <= 3) or is_outlier
+)
+
 force_new_mode = st.checkbox(
     "🆕 新規検体として扱う（過去データを無視してCOD基準で幅広く取る）",
-    value=not is_data_ready,
+    value=default_new_mode,
 )
+
+if is_outlier and not force_new_mode:
+    st.warning(
+        "⚠️ 本日のCOD値は過去データの平均から **±1σ（標準偏差）以上**"
+        "離れているため、安全のため自動的に「新規検体として扱う」にチェックが入っています。"
+    )
 
 if force_new_mode or model is None or not is_data_ready:
     est_bod_center = float(cod_input)
@@ -208,7 +226,6 @@ st.header("2. 推奨される仕込み量（分取量）水準")
 
 v_orig_ideal = (IDEAL_CONSUMPTION * BOTTLE_VOL) / est_bod_center
 
-# 10万倍までの超高濃度に対応する原液換算ステップ
 BASE_STEP_VOLUMES = [
     100.0,
     50.0,
